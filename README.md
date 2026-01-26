@@ -1,13 +1,31 @@
 # ExecAl
 
-Пустой репозиторий-шаблон. Тут будет код проекта **ExecAl**.
+MVP: **Python 3.11 + FastAPI + PostgreSQL + MinIO + Tesseract OCR (PNG/JPG) + PDF-отчёт**.
 
 ## Быстрый старт
 
-1. Склонировать репозиторий:
-   - `git clone https://github.com/unik1-web/ExecAl.git`
-2. Создать/добавить файлы, затем закоммитить и запушить изменения:
-   - `git add .`
-   - `git commit -m "Initial commit"`
-   - `git push`
+### Локальная разработка (рекомендуется)
+
+- **Только API + БД + MinIO**:
+  - `docker compose up --build`
+- **С фронтендом**:
+  - `docker compose --profile web up --build`
+- **С Telegram-ботом**:
+  - `TELEGRAM_BOT_TOKEN=xxx docker compose --profile telegram up --build`
+
+### Prod/Staging (гибридный подход)
+
+- `docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build`
+
+### Makefile (шорткаты)
+
+- `make up`
+- `make up-all`
+- `make up-prod`
+
+### Полезное
+
+- **API**: `http://localhost:8000` (Swagger: `/docs`)
+- **MinIO Console**: `http://localhost:9001` (minio / minio12345)
+- **Пример env**: `env.example` (можно скопировать в `.env`)
 

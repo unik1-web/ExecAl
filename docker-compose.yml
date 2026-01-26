@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: medical
+      POSTGRES_PASSWORD: medicalpass
+      POSTGRES_DB: medicallab
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  backend:
+    build: ./backend
+    depends_on:
+      - postgres
+      - minio
+    environment:
+      DATABASE_URL: postgresql+asyncpg://medical:medicalpass@postgres:5432/medicallab
+      JWT_SECRET: CHANGE_ME_IN_DOCKER
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio12345
+      MINIO_BUCKET: documents
+      MINIO_SECURE: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  # Скелеты клиентов вынесены в профили, чтобы `docker compose up` по умолчанию
+  # поднимал только backend+db+storage. Включайте при необходимости:
+  # `docker compose --profile web --profile telegram up -d`
+  web:
+    profiles: ["web"]
+    build: ./frontend/web
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+  telegram_bot:
+    profiles: ["telegram"]
+    build: ./frontend/telegram-bot
+    depends_on:
+      - backend
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+      TELEGRAM_BOT_TOKEN: CHANGE_ME
+    ports:
+      - "8081:8081"
+
+volumes:
+  pgdata:
+  minio-data:
+

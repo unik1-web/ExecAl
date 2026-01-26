@@ -1,0 +1,12 @@
+services:
+  web:
+    profiles: []
+    environment:
+      - VITE_API_BASE=${VITE_API_BASE:-http://backend:8000}
+
+  telegram_bot:
+    profiles: []
+    environment:
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-http://backend:8000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+
