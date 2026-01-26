@@ -14,7 +14,7 @@ ENV npm_config_registry=${NPM_REGISTRY} \
     npm_config_fetch_retry_mintimeout=10000
 
 COPY package.json package-lock.json* /app/
-RUN npm install --no-audit --no-fund
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
 COPY . /app
 
