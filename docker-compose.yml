@@ -49,7 +49,10 @@ services:
   # `docker compose --profile web --profile telegram up -d`
   web:
     profiles: ["web"]
-    build: ./frontend/web
+    build:
+      context: ./frontend/web
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     depends_on:
       - backend
     ports:
