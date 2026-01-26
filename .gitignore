@@ -5,6 +5,10 @@ Thumbs.db
 .vscode/
 ~$*.docx
 
+# Local env files
+.env
+env
+
 # Logs
 *.log
 logs/
