@@ -10,6 +10,7 @@ RUN apt-get update \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-rus \
+    fonts-dejavu-core \
     libjpeg62-turbo \
     zlib1g \
     libpng16-16 \

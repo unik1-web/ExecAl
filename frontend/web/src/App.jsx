@@ -63,6 +63,32 @@ export default function App() {
     return JSON.parse(text);
   };
 
+  const downloadPdf = async (analysisId) => {
+    if (!token) {
+      setStatus("ERROR\nСначала выполните login (нужен токен).");
+      return;
+    }
+    setStatus(`Скачиваю PDF для analysis_id=${analysisId}...`);
+    const r = await fetch(`${API_BASE}/report/${analysisId}/pdf`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      setStatus(`ERROR ${r.status}\n${t}`);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report_${analysisId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`PDF скачан: report_${analysisId}.pdf`);
+  };
+
   const upload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -149,21 +175,12 @@ export default function App() {
         <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
           <div>
             <b>analysis_id:</b> {lastAnalysisId}{" "}
-            {token ? (
-              <a
-                href={`${API_BASE}/report/${lastAnalysisId}/pdf`}
-                onClick={(ev) => {
-                  // нужно прокинуть Authorization — поэтому оставляем ссылку как подсказку
-                  // и рекомендуем скачивать через curl/браузер с токеном или сделать кнопку позже.
-                  ev.preventDefault();
-                  alert(
-                    "PDF endpoint готов: /report/{id}/pdf. Для скачивания с токеном проще использовать curl или сделать кнопку с fetch+blob."
-                  );
-                }}
-              >
-                (PDF endpoint)
-              </a>
-            ) : null}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => fetchReport(lastAnalysisId).then(setLastReport).catch((e) => setStatus(`ERROR\n${String(e)}`))}>
+              Refresh report
+            </button>
+            <button onClick={() => downloadPdf(lastAnalysisId)}>Download PDF</button>
           </div>
           {lastReport ? (
             <>
