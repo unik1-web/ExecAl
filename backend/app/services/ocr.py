@@ -531,6 +531,135 @@ def extract_tests_from_text(text: str) -> list[dict]:
             .replace("­", "-")
         )
 
+    def _first_number(s: str) -> float | None:
+        m = re.search(r"([0-9]+(?:[.,][0-9]+)?)", s)
+        if not m:
+            return None
+        return _num(m.group(1))
+
+    def _looks_like_name(s: str) -> bool:
+        if not s or len(s) < 3 or len(s) > 80:
+            return False
+        if not re.match(r"^[A-Za-zА-Яа-я]", s):
+            return False
+        low = s.lower()
+        # заголовки/служебное
+        if low in ("исследование", "результат", "единицы", "референсные", "значения", "комментарий"):
+            return False
+        # единицы/значения/комментарии не должны становиться именами
+        if _looks_like_units(s):
+            return False
+        if any(w in low for w in ("технология", "оборудование", "тест-система")):
+            return False
+        if any(w in low for w in ("отрицат", "положит", "не обнаруж", "обнаруж", "норма")):
+            return False
+        digits = sum(ch.isdigit() for ch in s)
+        if digits / max(1, len(s)) > 0.2:
+            return False
+        if any(k in low for k in skip_keywords):
+            return False
+        return True
+
+    def _parse_ref(s: str) -> tuple[float | None, float | None]:
+        s = s.replace("—", "-").replace("–", "-")
+        m = _RANGE_RE.search(s)
+        if m:
+            return _num(m.group("min")), _num(m.group("max"))
+        mop = ref_op_re.search(s)
+        if mop:
+            op = mop.group("op")
+            num = _num(mop.group("num"))
+            if op in ("<", "<="):
+                return None, num
+            return num, None
+        nums = [_first_number(x) for x in re.split(r"\s+", s)]
+        nums = [n for n in nums if n is not None]
+        if len(nums) >= 2:
+            return nums[0], nums[1]
+        return None, None
+
+    def _looks_like_units(s: str) -> bool:
+        if not s or len(s) > 20:
+            return False
+        if " " in s:
+            return False
+        if any(ch.isdigit() for ch in s):
+            return False
+        # типичные единицы почти всегда содержат "/" или "%", либо короткие общепринятые сокращения
+        low = s.lower().replace(".", "")
+        if "/" in low or "%" in low or "×" in s or "x" in low:
+            return True
+        return bool(re.fullmatch(r"(ме|ед|iu|u|mg|g|ng|pg|ммоль|мкмоль|мкг|мг|нг|пг|г|л|мл)", low))
+
+    # Табличный OCR-режим (PDF сканы часто дают "вертикальную" раскладку: имя/значение/ед/реф по строкам)
+    table_tests: list[dict] = []
+    cur: dict | None = None
+    for raw in lines[start_idx:]:
+        if not raw:
+            continue
+        line = _normalize_line(raw).strip()
+        if not line:
+            continue
+        low = line.lower()
+        if "внимание" in low:
+            break
+        if any(k in low for k in skip_keywords):
+            continue
+        if low == "значения":
+            continue
+        if cur:
+            # значение числовое отдельной строкой
+            if cur.get("value") is None and _NUM_RE.match(line):
+                cur["value"] = _num(line)
+                continue
+
+            # единицы отдельной строкой
+            if cur.get("units") is None and _looks_like_units(line):
+                cur["units"] = line
+                continue
+
+            # референс отдельной строкой
+            if cur.get("ref_min") is None and cur.get("ref_max") is None:
+                rmin, rmax = _parse_ref(line)
+                if rmin is not None or rmax is not None:
+                    cur["ref_min"], cur["ref_max"] = rmin, rmax
+                    continue
+
+            # качественное значение (например "отрицат.")
+            if cur.get("value") is None and len(line) <= 30 and re.search(r"[A-Za-zА-Яа-я]", line):
+                if any(w in low for w in ("отрицат", "положит", "не обнаруж", "обнаруж")):
+                    cur["comment"] = (cur.get("comment") + "\n" if cur.get("comment") else "") + line
+                    continue
+
+            # длинные комментарии по методике/оборудованию — приклеиваем к comment
+            if any(w in low for w in ("технология", "оборудование", "тест-система")):
+                cur["comment"] = (cur.get("comment") + "\n" if cur.get("comment") else "") + line
+                continue
+
+        # старт новой строки-показателя
+        if _looks_like_name(line):
+            if cur and cur.get("test_name"):
+                table_tests.append(cur)
+            cur = {"test_name": line, "value": None, "units": None, "ref_min": None, "ref_max": None, "comment": None}
+            continue
+
+        if not cur:
+            continue
+
+    if cur and cur.get("test_name"):
+        table_tests.append(cur)
+
+    # если таблицу распарсили — вернём её (и добавим к уже найденным glucose/cholesterol, если они есть)
+    if table_tests:
+        # нормализация/дедуп по имени
+        seen = {x.get("test_name", "").lower() for x in tests}
+        for t in table_tests:
+            if t["test_name"].lower() in seen:
+                continue
+            tests.append(t)
+            seen.add(t["test_name"].lower())
+        return tests
+
     # Построчно — меньше "смешивания" колонок
     for line in (ln.strip() for ln in lines[start_idx:]):
         if not line:

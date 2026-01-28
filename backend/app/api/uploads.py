@@ -83,7 +83,7 @@ async def upload_document(
             ref_min=ref_min,
             ref_max=ref_max,
             deviation=compute_deviation(value=value, ref_min=ref_min, ref_max=ref_max),
-            comment=None,
+            comment=t.get("comment"),
         )
         session.add(ind)
 
