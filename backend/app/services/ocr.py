@@ -83,23 +83,6 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
         if not tokens:
             return [], preview
 
-        # 1D k-means (k=2) по x0 для "чисто числовых" токенов — разделяем колонку значений и колонку референсов
-        num_x = [t["x0"] for t in tokens if _NUM_RE.match(t["text"])]
-        if len(num_x) < 6:
-            return [], preview
-
-        xs = sorted(num_x)
-        c1 = xs[int(len(xs) * 0.25)]
-        c2 = xs[int(len(xs) * 0.75)]
-        for _ in range(10):
-            g1 = [x for x in xs if abs(x - c1) <= abs(x - c2)]
-            g2 = [x for x in xs if abs(x - c2) < abs(x - c1)]
-            if g1:
-                c1 = sum(g1) / len(g1)
-            if g2:
-                c2 = sum(g2) / len(g2)
-        value_c, ref_c = (c1, c2) if c1 < c2 else (c2, c1)
-
         # группируем по строкам (y)
         tokens.sort(key=lambda t: ((t["y0"] + t["y1"]) / 2.0, t["x0"]))
         rows: list[list[dict]] = []
@@ -135,13 +118,181 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
                     merged.append(t.copy())
             return merged
 
-        blacklist = ("страница", "дата", "пол пациента", "согласие", "паспорт", "телефон", "адрес")
+        # Служебные/паспортные строки, которые не должны становиться "показателями"
+        blacklist = (
+            "страница",
+            "дата",
+            "пол пациента",
+            "согласие",
+            "паспорт",
+            "телефон",
+            "адрес",
+            "заказа",
+            "номер заказа",
+            "фамилия",
+            "имя",
+            "отчество",
+            "гост",
+            "iso",
+            "направляющий",
+            "диагноз",
+        )
+
+        def _first_number(s: str) -> float | None:
+            m = re.search(r"([0-9]+(?:[.,][0-9]+)?)", s)
+            if not m:
+                return None
+            return _num(m.group(1))
+
+        # Ищем заголовок таблицы и x-позиции колонок по словам:
+        # "Исследование/Показатель", "Значение", "Ед.", "Нормальные значения/Реф."
+        header_idx: int | None = None
+        header_y: float | None = None
+        col_value_x: float | None = None
+        col_units_x: float | None = None
+        col_ref_x: float | None = None
+        col_name_end_x: float | None = None
+
+        merged_rows = [_merge_row(r) for r in rows]
+        for idx, row in enumerate(merged_rows):
+            texts = " ".join(x["text"] for x in row).lower()
+            has_name = ("исслед" in texts) or ("показат" in texts)
+            has_value = "значен" in texts
+            has_units = ("ед" in texts) or ("ед." in texts) or ("ед изм" in texts)
+            has_ref = ("норм" in texts) or ("реф" in texts)
+            if has_name and has_value and has_units and has_ref:
+                header_idx = idx
+                header_y = sum((x["y0"] + x["y1"]) / 2.0 for x in row) / max(1, len(row))
+                for x in row:
+                    t = x["text"].lower()
+                    if col_value_x is None and "значен" in t:
+                        col_value_x = (x["x0"] + x["x1"]) / 2.0
+                    if col_units_x is None and ("ед" in t):
+                        col_units_x = (x["x0"] + x["x1"]) / 2.0
+                    if col_ref_x is None and ("норм" in t or "реф" in t):
+                        col_ref_x = (x["x0"] + x["x1"]) / 2.0
+                    if col_name_end_x is None and (("исслед" in t) or ("показат" in t)):
+                        col_name_end_x = x["x1"]
+                break
+
+        # Fallback: если заголовок не нашли, используем старую эвристику по x-распределению чисел
+        value_c = None
+        ref_c = None
+        if header_idx is None:
+            num_x = [t["x0"] for t in tokens if _NUM_RE.match(t["text"])]
+            if len(num_x) < 6:
+                return [], preview
+            xs = sorted(num_x)
+            c1 = xs[int(len(xs) * 0.25)]
+            c2 = xs[int(len(xs) * 0.75)]
+            for _ in range(10):
+                g1 = [x for x in xs if abs(x - c1) <= abs(x - c2)]
+                g2 = [x for x in xs if abs(x - c2) < abs(x - c1)]
+                if g1:
+                    c1 = sum(g1) / len(g1)
+                if g2:
+                    c2 = sum(g2) / len(g2)
+            value_c, ref_c = (c1, c2) if c1 < c2 else (c2, c1)
+        else:
+            # границы колонок из заголовка (самый надёжный вариант для PDF-таблиц)
+            if col_value_x is None or col_units_x is None or col_ref_x is None:
+                # если не смогли вытащить позиции колонок из заголовка — fallback
+                header_idx = None
+                num_x = [t["x0"] for t in tokens if _NUM_RE.match(t["text"])]
+                if len(num_x) < 6:
+                    return [], preview
+                xs = sorted(num_x)
+                c1 = xs[int(len(xs) * 0.25)]
+                c2 = xs[int(len(xs) * 0.75)]
+                for _ in range(10):
+                    g1 = [x for x in xs if abs(x - c1) <= abs(x - c2)]
+                    g2 = [x for x in xs if abs(x - c2) < abs(x - c1)]
+                    if g1:
+                        c1 = sum(g1) / len(g1)
+                    if g2:
+                        c2 = sum(g2) / len(g2)
+                value_c, ref_c = (c1, c2) if c1 < c2 else (c2, c1)
 
         tests: list[dict] = []
-        for row in rows:
-            row = _merge_row(row)
+        for idx, row in enumerate(merged_rows):
+            # если нашли таблицу — обрабатываем только строки ниже заголовка таблицы
+            if header_idx is not None:
+                if idx <= header_idx:
+                    continue
+
             texts = " ".join(x["text"] for x in row).lower()
             if any(b in texts for b in blacklist):
+                continue
+
+            # Если у нас есть координаты колонок (header найден) — раскладываем по колонкам
+            if header_idx is not None and col_value_x is not None and col_units_x is not None and col_ref_x is not None:
+                name_end = (col_name_end_x or (col_value_x - 10))
+                sep_name_value = (name_end + col_value_x) / 2.0
+                sep_value_units = (col_value_x + col_units_x) / 2.0
+                sep_units_ref = (col_units_x + col_ref_x) / 2.0
+
+                name_tokens: list[str] = []
+                value_tokens: list[str] = []
+                units_tokens: list[str] = []
+                ref_tokens: list[str] = []
+
+                for x in sorted(row, key=lambda t: t["x0"]):
+                    xc = (x["x0"] + x["x1"]) / 2.0
+                    tx = x["text"]
+                    if xc < sep_name_value:
+                        name_tokens.append(tx)
+                    elif xc < sep_value_units:
+                        value_tokens.append(tx)
+                    elif xc < sep_units_ref:
+                        units_tokens.append(tx)
+                    else:
+                        ref_tokens.append(tx)
+
+                name = " ".join(name_tokens).strip(" .,:;()[]")
+                if not name or len(name) < 3 or len(name) > 80:
+                    continue
+                if not re.match(r"^[A-Za-zА-Яа-я]", name):
+                    continue
+                # отсечём явно “мусорные” имена
+                if any(w in name.lower() for w in ("соглас", "страниц", "гост", "iso")):
+                    continue
+
+                value = None
+                for vt in value_tokens:
+                    if _NUM_RE.match(vt) or re.search(r"[0-9]", vt):
+                        value = _first_number(vt)
+                        if value is not None:
+                            break
+                if value is None:
+                    continue
+
+                units = None
+                u = " ".join(units_tokens).strip()
+                if u and len(u) <= 20 and _UNITS_RE.search(u):
+                    units = u
+
+                ref_min = None
+                ref_max = None
+                ref_joined = " ".join(ref_tokens).replace("—", "-").replace("–", "-")
+                m = _RANGE_RE.search(ref_joined)
+                if m:
+                    ref_min = _num(m.group("min"))
+                    ref_max = _num(m.group("max"))
+                else:
+                    nums = [ _first_number(t) for t in ref_tokens ]
+                    nums = [n for n in nums if n is not None]
+                    if len(nums) >= 2:
+                        ref_min, ref_max = nums[0], nums[1]
+
+                tests.append(
+                    {
+                        "test_name": name[:255],
+                        "value": value,
+                        "units": units,
+                        "ref_min": ref_min,
+                        "ref_max": ref_max,
+                    }
+                )
                 continue
 
             # кандидаты значений
