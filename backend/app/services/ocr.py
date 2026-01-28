@@ -124,13 +124,16 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
             "дата",
             "пол пациента",
             "согласие",
+            "обработк",
+            "персональн",
+            "пдн",
             "паспорт",
             "телефон",
             "адрес",
             "заказа",
             "номер заказа",
             "фамилия",
-            "имя",
+            "имя пациента",
             "отчество",
             "гост",
             "iso",
@@ -144,8 +147,22 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
                 return None
             return _num(m.group(1))
 
-        # Ищем заголовок таблицы и x-позиции колонок по словам:
-        # "Исследование/Показатель", "Значение", "Ед.", "Нормальные значения/Реф."
+        def _is_noise_name(name: str) -> bool:
+            n = name.lower()
+            if any(b in n for b in blacklist):
+                return True
+            # много цифр/служебных символов -> скорее номер/ГОСТ/код
+            digits = sum(ch.isdigit() for ch in name)
+            if digits / max(1, len(name)) > 0.25:
+                return True
+            if "№" in name or " N" in name:
+                return True
+            return False
+
+        # Ищем заголовок таблицы более устойчиво: по отдельным словам и кластеризации по Y.
+        # Это работает даже если "Ед. изм." / "Нормальные значения" разбиты на несколько спанов/блоков.
+        merged_rows = [_merge_row(r) for r in rows]
+
         header_idx: int | None = None
         header_y: float | None = None
         col_value_x: float | None = None
@@ -153,27 +170,72 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
         col_ref_x: float | None = None
         col_name_end_x: float | None = None
 
-        merged_rows = [_merge_row(r) for r in rows]
-        for idx, row in enumerate(merged_rows):
-            texts = " ".join(x["text"] for x in row).lower()
-            has_name = ("исслед" in texts) or ("показат" in texts)
-            has_value = "значен" in texts
-            has_units = ("ед" in texts) or ("ед." in texts) or ("ед изм" in texts)
-            has_ref = ("норм" in texts) or ("реф" in texts)
-            if has_name and has_value and has_units and has_ref:
-                header_idx = idx
-                header_y = sum((x["y0"] + x["y1"]) / 2.0 for x in row) / max(1, len(row))
-                for x in row:
-                    t = x["text"].lower()
-                    if col_value_x is None and "значен" in t:
-                        col_value_x = (x["x0"] + x["x1"]) / 2.0
-                    if col_units_x is None and ("ед" in t):
-                        col_units_x = (x["x0"] + x["x1"]) / 2.0
-                    if col_ref_x is None and ("норм" in t or "реф" in t):
-                        col_ref_x = (x["x0"] + x["x1"]) / 2.0
-                    if col_name_end_x is None and (("исслед" in t) or ("показат" in t)):
-                        col_name_end_x = x["x1"]
-                break
+        kw_map = {
+            "name": ("исслед", "показат"),
+            "value": ("значен",),
+            "units": ("ед", "ед.", "ед изм", "ед.изм"),
+            "ref": ("норм", "реф"),
+        }
+
+        matches: list[tuple[str, float, float, float]] = []  # (kind, xcenter, ycenter, x1)
+        for row in merged_rows:
+            for x in row:
+                t = x["text"].lower()
+                yc = (x["y0"] + x["y1"]) / 2.0
+                xc = (x["x0"] + x["x1"]) / 2.0
+                for kind, kws in kw_map.items():
+                    if any(k in t for k in kws):
+                        matches.append((kind, xc, yc, x["x1"]))
+                        break
+
+        # кластеризация по Y
+        if matches:
+            matches.sort(key=lambda m: m[2])
+            bands: list[dict] = []
+            band_tol = 4.5
+            for kind, xc, yc, x1 in matches:
+                if not bands:
+                    bands.append({"y": yc, "kinds": {kind}, "points": [(kind, xc, x1)]})
+                    continue
+                if abs(yc - bands[-1]["y"]) <= band_tol:
+                    b = bands[-1]
+                    b["kinds"].add(kind)
+                    b["points"].append((kind, xc, x1))
+                    # обновляем среднее Y
+                    b["y"] = (b["y"] * (len(b["points"]) - 1) + yc) / len(b["points"])
+                else:
+                    bands.append({"y": yc, "kinds": {kind}, "points": [(kind, xc, x1)]})
+
+            best = max(bands, key=lambda b: (len(b["kinds"]), len(b["points"])))
+            if len(best["kinds"]) >= 3:
+                header_y = float(best["y"])
+                # берём x по каждому типу в этом бэнде
+                def _median(xs: list[float]) -> float:
+                    xs = sorted(xs)
+                    return xs[len(xs) // 2]
+
+                xs_value = [xc for (k, xc, _x1) in best["points"] if k == "value"]
+                xs_units = [xc for (k, xc, _x1) in best["points"] if k == "units"]
+                xs_ref = [xc for (k, xc, _x1) in best["points"] if k == "ref"]
+                xs_name_end = [_x1 for (k, _xc, _x1) in best["points"] if k == "name"]
+
+                if xs_value:
+                    col_value_x = _median(xs_value)
+                if xs_units:
+                    col_units_x = _median(xs_units)
+                if xs_ref:
+                    col_ref_x = _median(xs_ref)
+                if xs_name_end:
+                    col_name_end_x = max(xs_name_end)
+
+                # найдём индекс строки, ближайшей к header_y
+                header_idx = min(
+                    range(len(merged_rows)),
+                    key=lambda i: abs(
+                        (sum((x["y0"] + x["y1"]) / 2.0 for x in merged_rows[i]) / max(1, len(merged_rows[i])))
+                        - header_y
+                    ),
+                )
 
         # Fallback: если заголовок не нашли, используем старую эвристику по x-распределению чисел
         value_c = None
@@ -254,7 +316,7 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
                 if not re.match(r"^[A-Za-zА-Яа-я]", name):
                     continue
                 # отсечём явно “мусорные” имена
-                if any(w in name.lower() for w in ("соглас", "страниц", "гост", "iso")):
+                if _is_noise_name(name):
                     continue
 
                 value = None
@@ -311,6 +373,8 @@ def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[d
             if not name or len(name) < 3 or len(name) > 80:
                 continue
             if not re.match(r"^[A-Za-zА-Яа-я]", name):
+                continue
+            if _is_noise_name(name):
                 continue
 
             value = _num(v_tok["text"])
