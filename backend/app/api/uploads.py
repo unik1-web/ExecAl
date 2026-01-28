@@ -10,7 +10,7 @@ from ..db import get_session
 from ..models import Analysis, TestIndicator, User
 from ..schemas import UploadResponse
 from ..services.normalization import compute_deviation
-from ..services.ocr import extract_tests_from_text, mock_extract_tests, ocr_image_bytes, ocr_pdf_bytes
+from ..services.ocr import extract_tests_from_pdf, extract_tests_from_text, mock_extract_tests, ocr_image_bytes, ocr_pdf_bytes
 from ..services.storage import put_object
 from .deps import get_current_user
 
@@ -53,8 +53,13 @@ async def upload_document(
             tests = []
     elif ctype in ("application/pdf",) or ctype.endswith("+pdf"):
         try:
-            ocr_text = ocr_pdf_bytes(content)
-            tests = extract_tests_from_text(ocr_text)
+            # 1) Пробуем структурно извлечь из "цифрового" PDF по координатам
+            tests, preview = extract_tests_from_pdf(content)
+            ocr_text = preview or None
+            # 2) Если не получилось — делаем OCR и построчный парсинг
+            if not tests:
+                ocr_text = ocr_pdf_bytes(content)
+                tests = extract_tests_from_text(ocr_text)
         except Exception:
             ocr_text = None
             tests = []
