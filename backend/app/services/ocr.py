@@ -486,6 +486,9 @@ def extract_tests_from_text(text: str) -> list[dict]:
 
     skip_keywords = (
         "инвитро",
+        "перейти на исходный",
+        "документ результатов",
+        "лабораторного тестирования",
         "пол",
         "возраст",
         "адрес",
@@ -515,10 +518,33 @@ def extract_tests_from_text(text: str) -> list[dict]:
 
     lines = [ln.strip() for ln in text.splitlines()]
     start_idx = 0
+    # 1) "горизонтальный" заголовок (в одной строке)
     for i, ln in enumerate(lines):
         if is_table_header(ln):
             start_idx = i + 1
             break
+
+    # 2) "вертикальный" заголовок (каждое слово в отдельной строке): Исследование / Результат / Единицы / Референсные / значения / Комментарий
+    if start_idx == 0:
+        header_tokens = ("исслед", "результ", "значен", "единиц", "ед.", "рефер", "норм", "коммент")
+
+        def _is_header_line(s: str) -> bool:
+            l = s.lower()
+            return any(t in l for t in header_tokens)
+
+        for i, ln in enumerate(lines):
+            l = ln.lower()
+            if ("исслед" in l) or ("показат" in l):
+                window = " ".join(lines[i : i + 10]).lower()
+                has_value = ("результ" in window) or ("значен" in window)
+                has_units = ("единиц" in window) or ("ед." in window) or ("ед изм" in window)
+                has_ref = ("рефер" in window) or ("норм" in window) or ("значен" in window)
+                if has_value and has_units and has_ref:
+                    j = i
+                    while j < len(lines) and _is_header_line(lines[j]):
+                        j += 1
+                    start_idx = j
+                    break
 
     def _normalize_line(s: str) -> str:
         # OCR часто выдаёт "не-ASCII" дефисы/минусы — приводим к обычному '-'
@@ -548,6 +574,8 @@ def extract_tests_from_text(text: str) -> list[dict]:
             return False
         # единицы/значения/комментарии не должны становиться именами
         if _looks_like_units(s):
+            return False
+        if low in ("муж", "жен", "мужской", "женский"):
             return False
         if any(w in low for w in ("технология", "оборудование", "тест-система")):
             return False
