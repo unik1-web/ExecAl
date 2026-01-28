@@ -497,8 +497,6 @@ def extract_tests_from_text(text: str) -> list[dict]:
         "заказ",
         "исполнитель",
         "подпись",
-        "технология",
-        "оборудование",
         "внимание",
         "результаты исследований",
         "не являются диагнозом",
@@ -522,10 +520,22 @@ def extract_tests_from_text(text: str) -> list[dict]:
             start_idx = i + 1
             break
 
+    def _normalize_line(s: str) -> str:
+        # OCR часто выдаёт "не-ASCII" дефисы/минусы — приводим к обычному '-'
+        return (
+            s.replace("‑", "-")
+            .replace("–", "-")
+            .replace("—", "-")
+            .replace("−", "-")
+            .replace("‐", "-")
+            .replace("­", "-")
+        )
+
     # Построчно — меньше "смешивания" колонок
     for line in (ln.strip() for ln in lines[start_idx:]):
         if not line:
             continue
+        line = _normalize_line(line)
         low = line.lower()
         if any(k in low for k in skip_keywords):
             # если это предупреждение/футер — можно прекратить парсинг
