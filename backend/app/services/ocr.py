@@ -51,8 +51,8 @@ def ocr_pdf_bytes(pdf_bytes: bytes, lang: str = "rus+eng", max_pages: int = 2) -
             # OCR fallback: 2x масштаб даёт заметно лучше OCR
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
             img_bytes = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_bytes))
-            text_parts.append(pytesseract.image_to_string(img, lang=lang))
+            # важно: используем тот же пайплайн, что и для PNG/JPG (предобработка + psm/oem)
+            text_parts.append(ocr_image_bytes(img_bytes, lang=lang))
     return "\n\n".join([t for t in text_parts if t])
 
 
