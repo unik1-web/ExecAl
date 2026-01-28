@@ -15,8 +15,17 @@ def ocr_image_bytes(image_bytes: bytes, lang: str = "rus+eng") -> str:
     if tcmd:
         pytesseract.pytesseract.tesseract_cmd = tcmd
 
-    img = Image.open(io.BytesIO(image_bytes))  # type: ignore[name-defined]
-    return pytesseract.image_to_string(img, lang=lang)
+    img = Image.open(io.BytesIO(image_bytes))
+    # лёгкая предобработка для сканов/скриншотов
+    img = img.convert("RGB")
+    w, h = img.size
+    if max(w, h) < 1200:
+        img = img.resize((w * 2, h * 2))
+    gray = img.convert("L")
+    bw = gray.point(lambda p: 255 if p > 170 else 0)
+    # PSM 6 обычно лучше для "табличных" скриншотов
+    config = "--oem 1 --psm 6"
+    return pytesseract.image_to_string(bw, lang=lang, config=config)
 
 
 def ocr_pdf_bytes(pdf_bytes: bytes, lang: str = "rus+eng", max_pages: int = 2) -> str:
@@ -468,28 +477,96 @@ def extract_tests_from_text(text: str) -> list[dict]:
     row_re = re.compile(
         r"(?P<name>[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9/\-\s]{2,50}?)\s+"
         r"(?P<value>[0-9]+[.,]?[0-9]*)\s*"
-        r"(?P<units>[A-Za-zА-Яа-я/%µμ\.]{0,12})\s*"
+        r"(?P<units>[A-Za-zА-Яа-я/%µμ\./×х\^]{0,12})\s*"
         r"(?:\(?\s*(?P<refmin>[0-9]+[.,]?[0-9]*)\s*[-–]\s*(?P<refmax>[0-9]+[.,]?[0-9]*)\s*\)?)?",
         re.IGNORECASE,
     )
+
+    ref_op_re = re.compile(r"(?P<op><=|>=|<|>)\s*(?P<num>[0-9]+[.,]?[0-9]*)")
+
+    skip_keywords = (
+        "инвитро",
+        "пол",
+        "возраст",
+        "адрес",
+        "дата",
+        "врач",
+        "пациент",
+        "инз",
+        "номер заказа",
+        "заказ",
+        "исполнитель",
+        "подпись",
+        "технология",
+        "оборудование",
+        "внимание",
+        "результаты исследований",
+        "не являются диагнозом",
+        "необходима консультация",
+        "www.",
+        "http",
+    )
+
+    def is_table_header(line: str) -> bool:
+        l = line.lower()
+        has_test = ("исслед" in l) or ("показат" in l)
+        has_value = ("результ" in l) or ("значен" in l)
+        has_units = ("ед" in l) or ("единиц" in l) or ("ед. изм" in l) or ("ед изм" in l)
+        has_ref = ("рефер" in l) or ("норм" in l) or ("нормальн" in l)
+        return has_test and has_value and has_units and has_ref
+
+    lines = [ln.strip() for ln in text.splitlines()]
+    start_idx = 0
+    for i, ln in enumerate(lines):
+        if is_table_header(ln):
+            start_idx = i + 1
+            break
+
     # Построчно — меньше "смешивания" колонок
-    for line in (ln.strip() for ln in text.splitlines()):
+    for line in (ln.strip() for ln in lines[start_idx:]):
         if not line:
             continue
+        low = line.lower()
+        if any(k in low for k in skip_keywords):
+            # если это предупреждение/футер — можно прекратить парсинг
+            if "внимание" in low:
+                break
+            continue
+        # защита от "паспортных" строк: слишком много цифр и двоеточие/точки
+        digits = sum(ch.isdigit() for ch in line)
+        if digits / max(1, len(line)) > 0.35 and (":" in line or "." in line):
+            continue
+
         for m2 in row_re.finditer(line):
             name = " ".join(m2.group("name").split()).strip(" .,:;()[]")
             if not name or len(name) < 3:
+                continue
+            if any(k in name.lower() for k in skip_keywords):
                 continue
             value = _num(m2.group("value"))
             units = (m2.group("units") or "").strip()
             refmin = m2.group("refmin")
             refmax = m2.group("refmax")
+
+            ref_min = _num(refmin) if refmin else None
+            ref_max = _num(refmax) if refmax else None
+            # поддержка референсов вида "<7,29" / "> 1.2"
+            if ref_min is None and ref_max is None:
+                mref = ref_op_re.search(line)
+                if mref:
+                    op = mref.group("op")
+                    num = _num(mref.group("num"))
+                    if op in ("<", "<="):
+                        ref_max = num
+                    else:
+                        ref_min = num
+
             t = {
                 "test_name": name[:255],
                 "value": value,
                 "units": units or None,
-                "ref_min": _num(refmin) if refmin else None,
-                "ref_max": _num(refmax) if refmax else None,
+                "ref_min": ref_min,
+                "ref_max": ref_max,
             }
             # не плодим дубликаты по имени
             if not any(x.get("test_name", "").lower() == t["test_name"].lower() for x in tests):
