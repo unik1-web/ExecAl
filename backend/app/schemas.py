@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserCreate(BaseModel):
@@ -12,6 +12,14 @@ class UserCreate(BaseModel):
     age: int | None = None
     gender: str | None = None
     language: str = "ru"
+
+    @field_validator("password")
+    @classmethod
+    def bcrypt_limit(cls, v: str) -> str:
+        # bcrypt ограничивает пароль 72 байтами (после utf-8 кодирования).
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be <= 72 bytes (bcrypt limit)")
+        return v
 
 
 class UserPublic(BaseModel):
@@ -26,6 +34,13 @@ class UserPublic(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def bcrypt_limit(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be <= 72 bytes (bcrypt limit)")
+        return v
 
 
 class Token(BaseModel):
