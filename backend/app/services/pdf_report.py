@@ -90,10 +90,19 @@ def build_report_pdf(
     def fmt(v):
         return "" if v is None else str(v)
 
+    def fmt_ref(ind: dict) -> str:
+        rmin = ind.get("ref_min")
+        rmax = ind.get("ref_max")
+        if rmin is None and rmax is None:
+            return ""
+        if rmin is None and rmax is not None:
+            return f"&lt; {fmt(rmax)}"
+        if rmin is not None and rmax is None:
+            return f"&gt; {fmt(rmin)}"
+        return f"{fmt(rmin)} – {fmt(rmax)}"
+
     for ind in indicators:
-        ref = ""
-        if ind.get("ref_min") is not None or ind.get("ref_max") is not None:
-            ref = f"{fmt(ind.get('ref_min'))} – {fmt(ind.get('ref_max'))}"
+        ref = fmt_ref(ind)
         dev = fmt(ind.get("deviation"))
         table_data.append(
             [
