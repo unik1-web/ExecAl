@@ -44,3 +44,6 @@ out/
 frontend/android/gradle/wrapper/
 frontend/android/gradlew
 frontend/android/gradlew.bat
+
+# Android keystore
+frontend/android/*.jks

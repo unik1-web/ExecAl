@@ -17,6 +17,31 @@
 
 3) Запусти на эмуляторе.
 
+## Как собрать APK
+
+### Debug APK
+
+- Команда: `.\gradlew.bat :app:assembleDebug`
+- Файл: `app/build/outputs/apk/debug/app-debug.apk`
+
+### Release APK (подпись через keystore)
+
+1) Создай keystore (если ещё нет):
+
+- `keytool -genkeypair -v -keystore execal-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias execal`
+
+2) Собери release, передав пароли через переменные окружения:
+
+```powershell
+$env:EXECAL_KEYSTORE_PATH = \"D:\\Documents\\GitHub\\ExecAl\\frontend\\android\\execal-release.jks\"
+$env:EXECAL_KEYSTORE_PASSWORD = \"<пароль_keystore>\"
+$env:EXECAL_KEY_ALIAS = \"execal\"
+$env:EXECAL_KEY_PASSWORD = \"<пароль_ключа>\"  # если совпадает с keystore — можно не задавать
+.\gradlew.bat :app:assembleRelease
+```
+
+- Файл: `app/build/outputs/apk/release/app-release.apk`
+
 ## Настройка API base
 
 По умолчанию приложение ходит в:

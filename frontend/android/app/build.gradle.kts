@@ -10,6 +10,18 @@ android {
     namespace = "com.execal.android"
     compileSdk = 34
 
+    signingConfigs {
+        // Release-подпись. Пароли НЕ храним в репозитории — передаём через env или local.properties.
+        // Keystore по умолчанию: frontend/android/execal-release.jks
+        create("release") {
+            val keystorePath = System.getenv("EXECAL_KEYSTORE_PATH") ?: "${rootDir}/execal-release.jks"
+            storeFile = file(keystorePath)
+            storePassword = System.getenv("EXECAL_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("EXECAL_KEY_ALIAS") ?: "execal"
+            keyPassword = System.getenv("EXECAL_KEY_PASSWORD") ?: System.getenv("EXECAL_KEYSTORE_PASSWORD")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.execal.android"
         minSdk = 26
@@ -28,6 +40,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
