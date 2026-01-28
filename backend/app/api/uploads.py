@@ -17,6 +17,46 @@ from .deps import get_current_user
 router = APIRouter()
 
 
+def _merge_tests(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    """
+    Сливаем результаты двух парсеров (структурный PDF + OCR-текст) с дедупом по имени.
+    Предпочитаем запись, где есть числовое value/референсы/единицы/комментарий.
+    """
+
+    def _key(t: dict) -> str:
+        return " ".join(str(t.get("test_name", "")).lower().split())
+
+    def _score(t: dict) -> int:
+        s = 0
+        if t.get("value") is not None:
+            s += 3
+        if t.get("units"):
+            s += 1
+        if t.get("ref_min") is not None or t.get("ref_max") is not None:
+            s += 1
+        if t.get("comment"):
+            s += 1
+        return s
+
+    out: dict[str, dict] = {}
+    for t in primary + secondary:
+        k = _key(t)
+        if not k:
+            continue
+        if k not in out or _score(t) > _score(out[k]):
+            out[k] = t
+    return list(out.values())
+
+
+def _truncate_text(s: str | None, limit: int = 15000) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "\n\n...[truncated]..."
+
+
 @router.post("/document", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
@@ -53,13 +93,23 @@ async def upload_document(
             tests = []
     elif ctype in ("application/pdf",) or ctype.endswith("+pdf"):
         try:
+            import os
+
+            pdf_max_pages = int(os.environ.get("PDF_MAX_PAGES", "4"))
+            min_pdf_tests = int(os.environ.get("PDF_MIN_TESTS", "3"))
+
             # 1) Пробуем структурно извлечь из "цифрового" PDF по координатам
-            tests, preview = extract_tests_from_pdf(content)
-            ocr_text = preview or None
-            # 2) Если не получилось — делаем OCR и построчный парсинг
-            if not tests:
-                ocr_text = ocr_pdf_bytes(content)
-                tests = extract_tests_from_text(ocr_text)
+            tests_struct, preview = extract_tests_from_pdf(content, max_pages=pdf_max_pages)
+            ocr_text = _truncate_text(preview) or None
+
+            # 2) Fallback: если получилось слишком мало показателей — делаем OCR и построчный парсинг
+            tests = tests_struct
+            if len(tests_struct) < min_pdf_tests:
+                ocr_full = ocr_pdf_bytes(content, max_pages=pdf_max_pages)
+                tests_ocr = extract_tests_from_text(ocr_full)
+                tests = _merge_tests(tests_ocr, tests_struct) if len(tests_ocr) > len(tests_struct) else _merge_tests(tests_struct, tests_ocr)
+                # для пользователя/отладки полезнее хранить именно OCR-текст, а не preview из PDF
+                ocr_text = _truncate_text(ocr_full) or ocr_text
         except Exception:
             ocr_text = None
             tests = []

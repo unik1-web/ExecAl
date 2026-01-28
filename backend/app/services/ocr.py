@@ -28,7 +28,7 @@ def ocr_image_bytes(image_bytes: bytes, lang: str = "rus+eng") -> str:
     return pytesseract.image_to_string(bw, lang=lang, config=config)
 
 
-def ocr_pdf_bytes(pdf_bytes: bytes, lang: str = "rus+eng", max_pages: int = 2) -> str:
+def ocr_pdf_bytes(pdf_bytes: bytes, lang: str = "rus+eng", max_pages: int = 4) -> str:
     """
     PDF -> text:
     - сначала пробуем извлечь текст напрямую (для "цифровых" PDF это лучше и быстрее)
@@ -61,7 +61,7 @@ _RANGE_RE = re.compile(r"(?P<min>[0-9]+(?:[.,][0-9]+)?)\s*[-–]\s*(?P<max>[0-9]
 _UNITS_RE = re.compile(r"[A-Za-zА-Яа-я/%µμ\^]|/|×|х")
 
 
-def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 2) -> tuple[list[dict], str]:
+def extract_tests_from_pdf(pdf_bytes: bytes, max_pages: int = 4) -> tuple[list[dict], str]:
     """
     Структурное извлечение из PDF по координатам (для "цифровых" PDF таблиц).
     Возвращает (tests, extracted_text_preview).
