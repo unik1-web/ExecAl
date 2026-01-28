@@ -262,21 +262,21 @@ def extract_tests_from_text(text: str) -> list[dict]:
         if not line:
             continue
         for m2 in row_re.finditer(line):
-        name = " ".join(m2.group("name").split()).strip(" .,:;()[]")
-        if not name or len(name) < 3:
-            continue
-        value = _num(m2.group("value"))
-        units = (m2.group("units") or "").strip()
-        refmin = m2.group("refmin")
-        refmax = m2.group("refmax")
-        t = {
-            "test_name": name[:255],
-            "value": value,
-            "units": units or None,
-            "ref_min": _num(refmin) if refmin else None,
-            "ref_max": _num(refmax) if refmax else None,
-        }
-        # не плодим дубликаты по имени
+            name = " ".join(m2.group("name").split()).strip(" .,:;()[]")
+            if not name or len(name) < 3:
+                continue
+            value = _num(m2.group("value"))
+            units = (m2.group("units") or "").strip()
+            refmin = m2.group("refmin")
+            refmax = m2.group("refmax")
+            t = {
+                "test_name": name[:255],
+                "value": value,
+                "units": units or None,
+                "ref_min": _num(refmin) if refmin else None,
+                "ref_max": _num(refmax) if refmax else None,
+            }
+            # не плодим дубликаты по имени
             if not any(x.get("test_name", "").lower() == t["test_name"].lower() for x in tests):
                 tests.append(t)
 
