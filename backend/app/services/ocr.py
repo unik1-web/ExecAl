@@ -15,17 +15,72 @@ def ocr_image_bytes(image_bytes: bytes, lang: str = "rus+eng") -> str:
     if tcmd:
         pytesseract.pytesseract.tesseract_cmd = tcmd
 
-    img = Image.open(io.BytesIO(image_bytes))
-    # лёгкая предобработка для сканов/скриншотов
-    img = img.convert("RGB")
-    w, h = img.size
-    if max(w, h) < 1200:
-        img = img.resize((w * 2, h * 2))
-    gray = img.convert("L")
-    bw = gray.point(lambda p: 255 if p > 170 else 0)
-    # PSM 6 обычно лучше для "табличных" скриншотов
-    config = "--oem 1 --psm 6"
-    return pytesseract.image_to_string(bw, lang=lang, config=config)
+    # Мульти-проход OCR: несколько вариантов предобработки и несколько PSM.
+    # Выбираем лучший результат по тому, сколько показателей удаётся извлечь парсером.
+    img0 = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    def _resize_if_small(im: Image.Image) -> Image.Image:
+        w, h = im.size
+        if max(w, h) < 1200:
+            return im.resize((w * 2, h * 2))
+        return im
+
+    def _binarize(gray: Image.Image, thr: int) -> Image.Image:
+        return gray.point(lambda p: 255 if p > thr else 0)
+
+    def _invert_if_needed(gray: Image.Image) -> Image.Image:
+        # если фон тёмный (скриншот/тёмная тема) — инвертируем
+        px = gray.resize((64, 64)).getdata()
+        avg = sum(px) / max(1, len(px))
+        if avg < 110:
+            return gray.point(lambda p: 255 - p)
+        return gray
+
+    # кандидаты изображений
+    variants: list[Image.Image] = []
+    base = _resize_if_small(img0)
+    gray = base.convert("L")
+    gray = _invert_if_needed(gray)
+    variants.append(gray)  # без бинаризации
+    for thr in (140, 170, 200):
+        variants.append(_binarize(gray, thr))
+
+    psms = (6, 4, 11)  # 6=таблица/блок, 4=колонки, 11=sparse
+
+    def _score_text(text: str) -> int:
+        if not text:
+            return -10_000
+        # основной сигнал: сколько показателей извлёк парсер
+        try:
+            extracted = extract_tests_from_text(text)
+        except Exception:
+            extracted = []
+        n_tests = len(extracted)
+        n_nums = len(re.findall(r"[0-9]+(?:[.,][0-9]+)?", text))
+        bonus = 0
+        low = text.lower()
+        if "исслед" in low or "показат" in low:
+            bonus += 10
+        if "рефер" in low or "норм" in low:
+            bonus += 5
+        # штраф за “паспортный” текст без таблицы
+        if ("перейти на исходный" in low) and n_tests <= 1:
+            bonus -= 20
+        return n_tests * 50 + n_nums + bonus
+
+    best_text = ""
+    best_score = -10_000
+
+    for im in variants:
+        for psm in psms:
+            config = f"--oem 1 --psm {psm}"
+            txt = pytesseract.image_to_string(im, lang=lang, config=config) or ""
+            sc = _score_text(txt)
+            if sc > best_score:
+                best_score = sc
+                best_text = txt
+
+    return best_text.strip()
 
 
 def ocr_pdf_bytes(pdf_bytes: bytes, lang: str = "rus+eng", max_pages: int = 4) -> str:
