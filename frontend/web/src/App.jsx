@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 export default function App() {
   const [token, setToken] = useState("");
-  const [email, setEmail] = useState("user@example.com");
+  const defaultEmail = useMemo(() => `user+${Date.now()}@example.com`, []);
+  const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState("password123");
   const [status, setStatus] = useState("");
 
@@ -15,7 +16,8 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password })
     });
-    setStatus(await r.text());
+    const body = await r.text();
+    setStatus(r.ok ? body : `ERROR ${r.status}\n${body}`);
   };
 
   const login = async () => {
@@ -25,8 +27,19 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password })
     });
-    const data = await r.json();
-    setToken(data.access_token ?? "");
+    const bodyText = await r.text();
+    let data;
+    try {
+      data = JSON.parse(bodyText);
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      setToken("");
+      setStatus(`ERROR ${r.status}\n${bodyText}`);
+      return;
+    }
+    setToken(data?.access_token ?? "");
     setStatus(JSON.stringify(data, null, 2));
   };
 
@@ -54,6 +67,9 @@ export default function App() {
           Email{" "}
           <input value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: "100%" }} />
         </label>
+        <button onClick={() => setEmail(`user+${Date.now()}@example.com`)} style={{ width: "fit-content" }}>
+          Generate new email
+        </button>
         <label>
           Password{" "}
           <input
