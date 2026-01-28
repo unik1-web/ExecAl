@@ -10,7 +10,7 @@ from ..db import get_session
 from ..models import Analysis, TestIndicator, User
 from ..schemas import UploadResponse
 from ..services.normalization import compute_deviation
-from ..services.ocr import extract_tests_from_text, mock_extract_tests, ocr_image_bytes
+from ..services.ocr import extract_tests_from_text, mock_extract_tests, ocr_image_bytes, ocr_pdf_bytes
 from ..services.storage import put_object
 from .deps import get_current_user
 
@@ -51,8 +51,17 @@ async def upload_document(
         except Exception:
             ocr_text = None
             tests = []
+    elif ctype in ("application/pdf",) or ctype.endswith("+pdf"):
+        try:
+            ocr_text = ocr_pdf_bytes(content)
+            tests = extract_tests_from_text(ocr_text)
+        except Exception:
+            ocr_text = None
+            tests = []
 
-    if not tests:
+    # Важно: если OCR/парсер ничего не нашёл, оставляем пусто (это честнее, чем одинаковая заглушка).
+    # Заглушку оставим только как ручной fallback через env.
+    if not tests and (str(__import__("os").environ.get("USE_MOCK_TESTS", "false")).lower() == "true"):
         tests = mock_extract_tests(ocr_text or "")
 
     analysis.ocr_text = ocr_text

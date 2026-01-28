@@ -47,6 +47,7 @@ async def get_report(
 
     report = {
         "analysis_id": analysis.id,
+        "ocr_text": analysis.ocr_text,
         "deviations": deviations,
         "recommendations": [{"text": r.text, "doctor_contact": r.doctor_contact} for r in recs],
         "indicators": [

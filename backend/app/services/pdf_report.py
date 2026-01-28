@@ -68,6 +68,15 @@ def build_report_pdf(
 
     # Таблица показателей
     story.append(Paragraph("Показатели", h2))
+    if not indicators:
+        story.append(
+            Paragraph(
+                "Не удалось автоматически извлечь показатели из документа. "
+                "Проверьте качество скана/контраст или предоставьте более читаемый файл.",
+                normal,
+            )
+        )
+        story.append(Spacer(1, 3 * mm))
     table_data: list[list] = [
         [
             Paragraph("<b>Показатель</b>", normal),
