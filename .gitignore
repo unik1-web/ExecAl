@@ -32,3 +32,16 @@ dist/
 build/
 out/
 
+# Android (Gradle/AS local)
+**/.gradle/
+**/local.properties
+**/hs_err_pid*.log
+**/.externalNativeBuild/
+**/.cxx/
+**/*.iml
+
+# Android Gradle Wrapper (не коммитим бинарники в этом репо)
+frontend/android/gradle/wrapper/
+frontend/android/gradlew
+frontend/android/gradlew.bat
+
