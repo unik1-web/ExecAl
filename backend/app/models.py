@@ -39,7 +39,8 @@ class Analysis(Base):
 
     date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     source: Mapped[str] = mapped_column(String(20), default="web")
-    format: Mapped[str] = mapped_column(String(10), default="file")
+    # content-type вроде application/pdf не помещается в 10 символов
+    format: Mapped[str] = mapped_column(String(100), default="file")
     status: Mapped[str] = mapped_column(String(20), default="received")  # received/processed/failed
 
     document_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)  # minio object key

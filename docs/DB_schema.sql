@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS analyses (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
   source VARCHAR(20) DEFAULT 'web',
-  format VARCHAR(10) DEFAULT 'file',
+  format VARCHAR(100) DEFAULT 'file',
   status VARCHAR(20) DEFAULT 'received',
   document_ref VARCHAR(255),
   ocr_text TEXT
